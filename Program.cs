@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 
 namespace HttpClientFactoryConsoleSample
 {
@@ -23,26 +27,39 @@ namespace HttpClientFactoryConsoleSample
             using var serviceScope = host.Services.CreateScope();
             {
                 var services = serviceScope.ServiceProvider;
-                try
-                {
-                    var myService = services.GetRequiredService<IMyService>();
-                    var pageContent = await myService.GetPage().ConfigureAwait(false);
+                IList<Coupon> models;
+                var codes = new List<string>{
+                        "BOOMMAC65CHRSTMSGME",
+                        "BOOMMAC75CHRSTMSGME",
+                        "BOOMMAC70CHRSTMSGME"
+                    };
+                Console.WriteLine($"Start with {DateTime.Now.ToShortTimeString()}: ======>");
 
-                    Console.WriteLine(pageContent.Substring(0, 500));
-                }
-                catch (Exception ex)
+                while (true)
                 {
-                    var logger = services.GetRequiredService<ILogger<Program>>();
-                    logger.LogError(ex, "An error occurred.");
+                    try
+                    {
+                        var myService = services.GetRequiredService<IMyService>();
+                        models = await myService.GetPage().ConfigureAwait(false);
+                        foreach (var coupon in models.Select(x => x.CouponCode))//.Where(x => codes.Select(code => code).Contains(x.CouponCode)))
+                        {
+                            if (codes.Contains(coupon))
+                                continue;
+                            Console.WriteLine(coupon);
+                            return 0;
+                        }
+                        Thread.Sleep(100);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e.StackTrace);
+                    }
                 }
             }
-
-            return 0;
         }
-
         public interface IMyService
         {
-            Task<string> GetPage();
+            Task<IList<Coupon>> GetPage();
         }
 
         public class MyService : IMyService
@@ -54,11 +71,46 @@ namespace HttpClientFactoryConsoleSample
                 HttpClient = httpClient;
             }
 
-            public async Task<string> GetPage()
+            public async Task<IList<Coupon>> GetPage()
             {
-                var response = await HttpClient.GetAsync("https://www.bbc.co.uk/programmes/b006q2x0").ConfigureAwait(false);
+                var json = JsonConvert.SerializeObject(new Happy());
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = await HttpClient.PostAsync("https://api.globaldelight.net/offer/getoffer/", content).ConfigureAwait(false);
                 response.EnsureSuccessStatusCode();
-                return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var result = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                return JsonConvert.DeserializeObject<IList<Coupon>>(result);
+            }
+        }
+
+        public class Happy
+        {
+            [JsonProperty("key")]
+            public string Key { get; } = "BoomMac";
+        }
+
+        public class Coupon
+        {
+            [JsonProperty("product")]
+            public string Product { get; set; }
+
+            [JsonProperty("offer")]
+            public long Offer { get; set; }
+
+            [JsonProperty("status")]
+            public string Status { get; set; }
+
+            [JsonProperty("count")]
+            public long Count { get; set; }
+
+            [JsonProperty("used")]
+            public string Used { get; set; }
+
+            [JsonProperty("coupon_code")]
+            public string CouponCode { get; set; }
+
+            public override string ToString()
+            {
+                return JsonConvert.SerializeObject(this);
             }
         }
     }
